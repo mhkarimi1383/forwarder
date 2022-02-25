@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
 	"sync"
 	"syscall"
 
@@ -51,11 +50,6 @@ func WithForwarders(ctx context.Context, options []*Option, kubeconfigPath strin
 		return nil, err
 	}
 
-	return forwarders(ctx, options, config)
-}
-
-// It is to forward port with restclient.Config.
-func WithRestConfig(ctx context.Context, options []*Option, config *restclient.Config) (*Result, error) {
 	return forwarders(ctx, options, config)
 }
 
@@ -149,24 +143,24 @@ func forwarders(ctx context.Context, options []*Option, config *restclient.Confi
 
 // It is to forward port, and return the forwarder.
 func portForwardAPod(req *portForwardAPodRequest) (*portforward.PortForwarder, error) {
-	targetURL, err := url.Parse(req.RestConfig.Host)
+	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward",
+		req.Pod.Namespace, req.Pod.Name)
+
+	parsed, err := url.Parse(req.RestConfig.Host)
 	if err != nil {
 		return nil, err
 	}
 
-	targetURL.Path = path.Join(
-		"api", "v1",
-		"namespaces", req.Pod.Namespace,
-		"pods", req.Pod.Name,
-		"portforward",
-	)
+	hostIP := parsed.Host
+
+	path = parsed.Path + path
 
 	transport, upgrader, err := spdy.RoundTripperFor(req.RestConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, targetURL)
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: path, Host: hostIP})
 	fw, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", req.LocalPort, req.PodPort)}, req.StopCh, req.ReadyCh, req.Streams.Out, req.Streams.ErrOut)
 	if err != nil {
 		return nil, err
